@@ -663,26 +663,81 @@ strstrany(char* s, char** strs) {
 	return NULL;
 }
 
+int match_utf8_char(const char *s, const char *utf8char) {
+	return strncmp(s, utf8char, strlen(utf8char)) == 0;
+}
+
 void
 highlighturlsline(int row)
 {
-	char *linestr = calloc(sizeof(char), term.col+1); /* assume ascii */
-	char *match;
-	for (int j = 0; j < term.col; j++) {
-		if (TLINE(row)[j].u < 127) {
-			linestr[j] = TLINE(row)[j].u;
+	int col = term.col;
+	int j = 0;
+
+	while (j < col) {
+		int found_prefix = -1;
+
+		// Check for each prefix
+		for (int i = 0; urlprefixes[i]; i++) {
+			const char *prefix = urlprefixes[i];
+			int len = strlen(prefix);
+			if (j + len >= col)
+				continue;
+
+			int match = 1;
+			for (int k = 0; k < len; k++) {
+				if ((char)TLINE(row)[j + k].u != prefix[k]) {
+					match = 0;
+					break;
+				}
+			}
+			if (match) {
+				found_prefix = j;
+				break;
+			}
 		}
-		linestr[term.col] = '\0';
-	}
-	int url_start = -1;
-	while ((match = strstrany(linestr + url_start + 1, urlprefixes))) {
-		url_start = match - linestr;
-		for (int c = url_start; c < term.col && strchr(urlchars, linestr[c]); c++) {
-			TLINE(row)[c].mode |= ATTR_URL;
-			tsetdirt(row, c);
+
+		if (found_prefix == -1) {
+			j++;
+			continue;
 		}
+
+		// Move forward to find URL end
+		int url_start = found_prefix;
+		int url_end = url_start;
+
+		while (url_end < col && strchr(urlchars, (char)TLINE(row)[url_end].u)) {
+			url_end++;
+		}
+
+		// Trim trailing chars (e.g., ⟩ > ) . ,)
+		while (url_end > url_start) {
+			Rune r = TLINE(row)[url_end - 1].u;
+			if (r == '.' || r == ',' || r == ')' || r == '>' || r == 0x27E9) {
+				url_end--;
+			} else {
+				break;
+			}
+		}
+
+		// Trim leading chars (e.g., ⟨ < ()
+		while (url_start < url_end) {
+			Rune r = TLINE(row)[url_start].u;
+			if (r == '(' || r == '<' || r == 0x27E8) {
+				url_start++;
+			} else {
+				break;
+			}
+		}
+
+		// Highlight the final valid URL region
+		for (int k = url_start; k < url_end; k++) {
+			TLINE(row)[k].mode |= ATTR_URL;
+			tsetdirt(row, k);
+		}
+
+		// Move past this URL
+		j = url_end;
 	}
-	free(linestr);
 }
 
 void
@@ -699,43 +754,100 @@ unhighlighturlsline(int row)
 }
 
 int
-followurl(int col, int row) {
-	char *linestr = calloc(sizeof(char), term.col+1); /* assume ascii */
-	char *match;
-	for (int i = 0; i < term.col; i++) {
-		if (TLINE(row)[i].u < 127) {
-			linestr[i] = TLINE(row)[i].u;
-		}
-		linestr[term.col] = '\0';
+followurl(int col, int row)
+{
+	char linebuf[4096];
+	char url[4096];
+	char *p = linebuf;
+	int i, url_start = -1, url_end = -1;
+	int width = term.col;
+
+	// Encode the entire line to UTF-8
+	for (i = 0; i < width; i++) {
+		p += utf8encode(TLINE(row)[i].u, p);
 	}
-	int url_start = -1, found_url = 0;
-	while ((match = strstrany(linestr + url_start + 1, urlprefixes))) {
-		url_start = match - linestr;
-		int url_end = url_start;
-		for (int c = url_start; c < term.col && strchr(urlchars, linestr[c]); c++) {
-			url_end++;
+	*p = '\0';
+
+	// Now search for all URL prefixes
+	for (i = 0; i < width; i++) {
+		for (int j = 0; urlprefixes[j]; j++) {
+			const char *prefix = urlprefixes[j];
+			int len = strlen(prefix);
+			int k;
+
+			if (i + len >= width)
+				continue;
+
+			int match = 1;
+			for (k = 0; k < len; k++) {
+				if ((char)TLINE(row)[i + k].u != prefix[k]) {
+					match = 0;
+					break;
+				}
+			}
+			if (!match)
+				continue;
+
+			// Found a URL start
+			int start = i;
+			int end = start;
+
+			while (end < width && strchr(urlchars, (char)TLINE(row)[end].u)) {
+				end++;
+			}
+
+			// Trim trailing punctuation (e.g., '.', ')', '>', '⟩')
+			while (end > start) {
+				Rune r = TLINE(row)[end - 1].u;
+				if (r == '.' || r == ',' || r == ')' || r == '>' || r == 0x27E9) {
+					end--;
+				} else {
+					break;
+				}
+			}
+
+			// Trim leading punctuation (e.g., '(', '<', '⟨')
+			while (start < end) {
+				Rune r = TLINE(row)[start].u;
+				if (r == '(' || r == '<' || r == 0x27E8) {
+					start++;
+				} else {
+					break;
+				}
+			}
+
+			// Check if the column is inside this URL
+			if (col >= start && col < end) {
+				url_start = start;
+				url_end = end;
+				goto found;
+			}
+
+			i = end;
 		}
-		if (url_start <= col && col < url_end) {
-			found_url = 1;
-			linestr[url_end] = '\0';
-			break;
-		}
-	}
-	if (!found_url) {
-		free(linestr);
-		return 0;
 	}
 
+	return 0; // No matching URL under cursor
+
+found:
+	// Build the final URL string
+	char *out = url;
+	for (int i = url_start; i < url_end; i++) {
+		out += utf8encode(TLINE(row)[i].u, out);
+	}
+	*out = '\0';
+
+	// Spawn the handler
 	pid_t chpid;
 	if ((chpid = fork()) == 0) {
 		if (fork() == 0)
-			execlp(urlhandler, urlhandler, linestr + url_start, NULL);
+			execlp(urlhandler, urlhandler, url, (char *)NULL);
 		exit(1);
 	}
 	if (chpid > 0)
 		waitpid(chpid, NULL, 0);
-	free(linestr);
-    return 1;
+
+	return 1;
 }
 
 void
