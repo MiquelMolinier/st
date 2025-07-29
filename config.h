@@ -8,9 +8,9 @@
 static char *font =  "JetBrainsMono Nerd Font:style=Medium:pixelsize=16:antialias=true:autohint=true";
 /* Spare fonts */
 static char *font2[] = {
-  "Liberation Mono:pixelsize=16:antialias=true:autohint=true",
-  "Noto Color Emoji:style=Regular:pixelsize=10:antialias=true:autohint=true",
+  "Noto Color Emoji:style=Regular:pixelsize=12:antialias=true:autohint=true",
 /*	"Inconsolata for Powerline:pixelsize=12:antialias=true:autohint=true", */
+/*  "Liberation Mono:pixelsize=16:antialias=true:autohint=true", */
 /*	"Hack Nerd Font Mono:pixelsize=11:antialias=true:autohint=true", */
 };
 
@@ -115,7 +115,7 @@ char *termname = "st-256color";
 unsigned int tabspaces = 8;
 
 /* bg opacity */
-float alpha = 0.9;
+float alpha = 0.7;
 
 /* Background opacity */
 float alpha_def;
@@ -235,6 +235,8 @@ static Shortcut shortcuts[] = {
 	{ TERMMOD,              XK_Num_Lock,        numlock,        {.i =  0} },
 	{ ShiftMask,            XK_Page_Up,         kscrollup,      {.f = -0.1} },
 	{ ShiftMask,            XK_Page_Down,       kscrolldown,    {.f = -0.1} },
+  { ShiftMask,            XK_Home,            kscrollup,      {.f = -1} },
+	{ ShiftMask,            XK_End,             kscrolldown,    {.f = -1} },
 };
 
 /*
