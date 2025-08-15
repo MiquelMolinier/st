@@ -1639,7 +1639,7 @@ void xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len,
       if (base.ustyle != 3) {
         // XftDrawRect(xw.draw, fg, winx, winy + dc.font.ascent + 1, width, 1);
         XFillRectangle(xw.dpy, XftDrawDrawable(xw.draw), ugc, winx,
-                       winy + dc.font.ascent + 1, width, wlw*2 + 1);
+                       winy + dc.font.ascent + 1, width, wlw * 2 + 1);
       } else if (base.ustyle == 3) {
         int ww = win.cw;                        // width;
         int wh = dc.font.descent - wlw / 2 - 1; // r.height/7;
@@ -2079,38 +2079,61 @@ void xsettitle(char *p) {
 int xstartdraw(void) { return IS_SET(MODE_VISIBLE); }
 
 void xdrawline(Line line, int x1, int y1, int x2) {
-  int i, x, ox, numspecs, numspecs_cached;
-  Glyph base, new;
-  XftGlyphFontSpec *specs;
+  int x;
 
-  numspecs_cached = xmakeglyphfontspecs(xw.specbuf, &line[x1], x2 - x1, x1, y1);
-
-  /* Draw line in 2 passes: background and foreground. This way wide glyphs
- won't get truncated (#223) */
+  /* Draw line in 2 passes: background then foreground */
   for (int dmode = DRAW_BG; dmode <= DRAW_FG; dmode <<= 1) {
-    specs = xw.specbuf;
-    numspecs = numspecs_cached;
-    i = ox = 0;
-    for (x = x1; x < x2 && i < numspecs; x++) {
-      new = line[x];
-      if (new.mode == ATTR_WDUMMY)
-        continue;
+    x = x1;
+
+    while (x < x2) {
+      /* Skip dummy halves of wide glyphs */
+      while (x < x2 && line[x].mode == ATTR_WDUMMY)
+        x++;
+      if (x >= x2)
+        break;
+
+      /* Start a new run at the first non-dummy cell */
+      int runstart = x;
+      Glyph base = line[x];
+      Glyph draw = base;
+
       if (selected(x, y1))
-        new.mode ^= ATTR_REVERSE;
-      if (i > 0 && ATTRCMP(base, new)) {
-        xdrawglyphfontspecs(specs, base, i, ox, y1, x - ox, dmode);
-        specs += i;
-        numspecs -= i;
-        i = 0;
+        draw.mode ^= ATTR_REVERSE;
+
+      /* total cell width (1 for normal, 2 for wide) to paint for this run */
+      int charlen = (base.mode & ATTR_WIDE) ? 2 : 1;
+
+      /* Extend run while attributes (incl. selection inversion) stay the same
+       */
+      int j = x + 1;
+      for (; j < x2; j++) {
+        if (line[j].mode == ATTR_WDUMMY)
+          continue; /* belongs to previous wide glyph; width already counted */
+
+        Glyph g = line[j];
+        Glyph adj = g;
+        if (selected(j, y1))
+          adj.mode ^= ATTR_REVERSE;
+
+        if (ATTRCMP(draw, adj))
+          break;
+
+        charlen += (g.mode & ATTR_WIDE) ? 2 : 1;
       }
-      if (i == 0) {
-        ox = x;
-        base = new;
-      }
-      i++;
+
+      /* Shape JUST this run so font choice (bold/normal/italic) is correct */
+      int runlen_cells = j - runstart; /* include WDUMMY cells in the slice */
+      XftGlyphFontSpec *specs = xw.specbuf;
+      int numspecs = xmakeglyphfontspecs(specs, &line[runstart], runlen_cells,
+                                         runstart, y1);
+
+      /* Draw this run */
+      if (numspecs > 0)
+        xdrawglyphfontspecs(specs, draw, numspecs, runstart, y1, charlen,
+                            dmode);
+
+      x = j; /* next run */
     }
-    if (i > 0)
-      xdrawglyphfontspecs(specs, base, i, ox, y1, x2 - ox, dmode);
   }
 }
 
