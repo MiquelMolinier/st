@@ -1,7 +1,0 @@
---- st.h
-+++ st.h
-@@ -127,3 +128,4 @@ extern unsigned int tabspaces;
- extern unsigned int defaultfg;
- extern unsigned int defaultbg;
- extern unsigned int defaultcs;
-+extern char *iso14755_cmd;
